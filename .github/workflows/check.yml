@@ -40,11 +40,7 @@ jobs:
           CHECK_TIMEOUT: "90"
 
       - name: Verify generated files
-        run: |
-          if [ ! -d "public" ] || [ -z "$(ls -A public)" ]; then
-            echo "::error::public 
-            exit 1
-          fi
+        run: ls -A public | grep -q .
 
       - name: Configure Pages
         uses: actions/configure-pages@v6
