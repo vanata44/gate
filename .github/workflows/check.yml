@@ -2,7 +2,8 @@ name: VPN Gate Node Check
 
 on:
   schedule:
-    - cron: "0 */6 * * *"
+    # 错开整点高峰，每 6 小时在第 17 分钟运行
+    - cron: "17 */6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -11,24 +12,25 @@ permissions:
   id-token: write
 
 concurrency:
-  group: gate-check
+  group: pages
   cancel-in-progress: false
 
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.12"
+          cache: "pip"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install --disable-pip-version-check -r requirements.txt
 
       - name: Get VPN Gate nodes + check via Cloudflare Worker + build page
         run: python vpngate.py
@@ -38,24 +40,12 @@ jobs:
           CHECK_CONCURRENCY: "32"
           CHECK_TIMEOUT: "90"
 
-      - name: Ensure GitHub Pages is enabled (one-time auto setup)
+      - name: Verify generated files
         run: |
-          code=$(curl -s -o /dev/null -w '%{http_code}' \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/pages")
-          echo "Pages API status: $code"
-          if [ "$code" = "404" ]; then
-            echo "首次运行: 启用 GitHub Pages (source = GitHub Actions, 目录 /public)"
-            curl -sS -X PUT \
-              -H "Authorization: Bearer $GITHUB_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d '{"build_type":"workflow","source":{"branches":["main"],"path":"/public"}}' \
-              "https://api.github.com/repos/$GITHUB_REPOSITORY/pages"
-            echo
-            sleep 10
+          if [ ! -d "public" ] || [ -z "$(ls -A public)" ]; then
+            echo "::error::public 目录为空，中止部署以保留现有节点"
+            exit 1
           fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure Pages
         uses: actions/configure-pages@v6
@@ -63,11 +53,12 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
         with:
-          path: 'public'
+          path: "public"
 
   deploy:
     needs: check
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -75,6 +66,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
-
-      - name: Show site URL
-        run: 'echo "site: https://vanata44.github.io/gate/ (deploy outcome: ${{ steps.deployment.outcome }})"'
